@@ -1,0 +1,7 @@
+{
+  "name": "AudioFX Processor",
+  "description": "A professional-grade real-time audio reverb processor with single-stream output, spectral visualization, and Gemini-powered acoustic modeling.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
