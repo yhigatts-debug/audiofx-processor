@@ -118,33 +118,36 @@ export class AudioEngine {
         this.source = this.ctx.createMediaStreamSource(this.stream);
       }
 
-      if (!this.source) throw new Error("Source creation failed");
-
       // Routing
       this.analyserInput = this.ctx.createAnalyser();
       this.analyserOutput = this.ctx.createAnalyser();
+      this.analyserInput.fftSize = 2048;
+      this.analyserOutput.fftSize = 2048;
+
       this.source.connect(this.analyserInput);
 
-      // Path A: Effect path (Dry mix inside wet path)
       this.lowCutFilter = this.ctx.createBiquadFilter();
       this.lowCutFilter.type = 'highpass';
       this.highCutFilter = this.ctx.createBiquadFilter();
       this.highCutFilter.type = 'lowpass';
+      
       this.reverbNode = new AudioWorkletNode(this.ctx, 'reverb-processor');
       this.wetGainNode = this.ctx.createGain();
       this.wetPathDryGainNode = this.ctx.createGain();
+      this.bypassGainNode = this.ctx.createGain();
 
+      // Path A: Effect
       this.source.connect(this.lowCutFilter);
       this.lowCutFilter.connect(this.highCutFilter);
       this.highCutFilter.connect(this.reverbNode);
       this.reverbNode.connect(this.wetGainNode);
+      
+      // Path B: Dry in Wet Path
       this.source.connect(this.wetPathDryGainNode);
 
-      // Path B: Bypass path
-      this.bypassGainNode = this.ctx.createGain();
+      // Path C: Absolute Bypass
       this.source.connect(this.bypassGainNode);
 
-      // Final Master
       const masterMix = this.ctx.createGain();
       this.wetGainNode.connect(masterMix);
       this.wetPathDryGainNode.connect(masterMix);
@@ -153,9 +156,10 @@ export class AudioEngine {
       masterMix.connect(this.analyserOutput);
       this.analyserOutput.connect(this.ctx.destination);
 
-      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      if (this.ctx.state === 'suspended') {
+        await this.ctx.resume();
+      }
 
-      // AudioBufferSourceNodeの場合は接続後に開始する
       if (this.source instanceof AudioBufferSourceNode) {
         this.source.start(0);
       }
@@ -165,16 +169,6 @@ export class AudioEngine {
       throw e;
     } finally {
       this.isInitializing = false;
-    }
-  }
-
-  async setOutputDevice(deviceId: string) {
-    if (this.ctx && (this.ctx as any).setSinkId) {
-      try { 
-        await (this.ctx as any).setSinkId(deviceId); 
-      } catch (e) { 
-        console.warn(`setSinkId failed`, e); 
-      }
     }
   }
 
@@ -208,7 +202,12 @@ export class AudioEngine {
 
   async close() {
     if (this.ctx) { 
-      try { await this.ctx.close(); } catch(e) {} 
+      try { 
+        if (this.source instanceof AudioBufferSourceNode) {
+          this.source.stop();
+        }
+        await this.ctx.close(); 
+      } catch(e) {} 
       this.ctx = null; 
     }
     if (this.stream) { 
@@ -227,7 +226,7 @@ export class AudioEngine {
     const sourceBuffer = await tempCtx.decodeAudioData(arrayBuffer);
     await tempCtx.close();
 
-    const renderDuration = sourceBuffer.duration + settings.reverbDuration + 1.0;
+    const renderDuration = sourceBuffer.duration + settings.reverbDuration + 0.5;
     const offlineCtx = new OfflineAudioContext(2, Math.ceil(renderDuration * sourceBuffer.sampleRate), sourceBuffer.sampleRate);
     
     const workletUrl = await this.getWorkletUrl();
