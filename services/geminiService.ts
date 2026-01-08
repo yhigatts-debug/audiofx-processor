@@ -2,12 +2,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 export const getGeminiPresets = async (description: string) => {
-  // リクエストの直前にインスタンスを生成（最新のAPIキーを反映するため）
+  // Always use a new instance to ensure it uses the latest API key from process.env.API_KEY
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      // Use gemini-3-pro-preview for complex reasoning tasks like acoustic engineering
+      model: 'gemini-3-pro-preview',
       contents: `
         [Role] Professional Acoustic Engineer
         [Task] Create 3 reverb presets for the following environment:
@@ -24,7 +25,7 @@ export const getGeminiPresets = async (description: string) => {
         - wetGain: 0.0 to 1.0
       `,
       config: {
-        thinkingConfig: { thinkingBudget: 0 },
+        // By default, the model decides how much to think, but for complex tasks, pro models benefit from reasoning.
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,

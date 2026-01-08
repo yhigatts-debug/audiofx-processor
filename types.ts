@@ -11,12 +11,11 @@ export interface AudioSettings {
   isProcessing: boolean;
   bypassEffects: boolean;
   bypassGain: number; 
+  masterGain: number; // 全体の出力音量
 }
 
-// AIへの受け渡しを最適化したプロファイル形式
 export interface AudioEnvironmentProfile {
   version: string;
-  // AIがパラメータの定義を誤解しないためのヒント
   "@context": {
     rt60: "Reverb duration in seconds (Time to decay by 60dB)";
     damping: "High-frequency absorption factor (1.0 = linear, 10.0 = heavy damping)";
@@ -24,6 +23,7 @@ export interface AudioEnvironmentProfile {
     highPassHz: "Low-cut filter frequency in Hertz";
     lowPassHz: "High-cut filter frequency in Hertz";
     mixRatio: "Dry/Wet balance (0.0 = Dry, 1.0 = Wet)";
+    masterVol: "Overall output level";
   };
   metadata: {
     name: string;
@@ -37,6 +37,7 @@ export interface AudioEnvironmentProfile {
     highPassHz: number;
     lowPassHz: number;
     mixRatio: number;
+    masterVol: number;
   };
 }
 

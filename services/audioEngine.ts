@@ -8,10 +8,10 @@ export class AudioEngine {
   
   private source: MediaStreamAudioSourceNode | AudioBufferSourceNode | null = null;
   
-  private dryGainNode: GainNode | null = null;
   private wetGainNode: GainNode | null = null;
   private wetPathDryGainNode: GainNode | null = null;
   private bypassGainNode: GainNode | null = null;
+  private masterGainNode: GainNode | null = null;
   
   private reverbNode: AudioWorkletNode | null = null;
   private lowCutFilter: BiquadFilterNode | null = null;
@@ -19,6 +19,10 @@ export class AudioEngine {
   
   public analyserInput: AnalyserNode | null = null;
   public analyserOutput: AnalyserNode | null = null;
+
+  // 安全装置用のプロパティ
+  private safetyTimer: number | null = null;
+  public onAutoMuteTriggered: (() => void) | null = null;
 
   private static readonly REVERB_WORKLET_CODE = `
     class ReverbProcessor extends AudioWorkletProcessor {
@@ -33,7 +37,12 @@ export class AudioEngine {
         super();
         const fs = globalThis.sampleRate || 48000;
         const scale = fs / 48000;
-        this.delayTimes = [Math.floor(1331 * scale), Math.floor(1693 * scale), Math.floor(2011 * scale), Math.floor(2381 * scale)]; 
+        this.delayTimes = [
+          Math.floor(1331 * scale), 
+          Math.floor(1693 * scale), 
+          Math.floor(2011 * scale), 
+          Math.floor(2381 * scale)
+        ]; 
         this.delayBuffers = this.delayTimes.map(size => new Float32Array(size));
         this.delayPointers = new Int32Array(4).fill(0);
         this.preDelayBuffer = new Float32Array(Math.floor(fs));
@@ -44,31 +53,39 @@ export class AudioEngine {
         const input = inputs[0];
         const output = outputs[0];
         if (!input || !input[0]) return true;
+
         const fs = globalThis.sampleRate || 48000;
         const rt60 = parameters.rt60[0];
         const damping = parameters.damping[0];
         const preDelaySeconds = parameters.preDelay[0];
+
         const feedbackGains = this.delayTimes.map(size => Math.pow(10, (-3 * size) / (rt60 * fs)));
         const lpCoef = Math.min(0.95, 1.0 / damping);
+
         const inputChannel = input[0];
         const outputL = output[0];
         const outputR = output[1] || outputL;
+
         for (let i = 0; i < inputChannel.length; i++) {
           const preDelaySamples = Math.min(this.preDelayBuffer.length - 1, Math.floor(preDelaySeconds * fs));
           this.preDelayBuffer[this.preDelayPointer] = inputChannel[i];
           const readPtr = (this.preDelayPointer - preDelaySamples + this.preDelayBuffer.length) % this.preDelayBuffer.length;
           const delayedInput = this.preDelayBuffer[readPtr];
           this.preDelayPointer = (this.preDelayPointer + 1) % this.preDelayBuffer.length;
+
           const nodeSignals = new Float32Array(4);
           for (let j = 0; j < 4; j++) nodeSignals[j] = this.delayBuffers[j][this.delayPointers[j]];
+
           const sum = nodeSignals[0] + nodeSignals[1] + nodeSignals[2] + nodeSignals[3];
           const mix = sum * 0.5;
+          
           for (let j = 0; j < 4; j++) {
             const val = (nodeSignals[j] - mix) * feedbackGains[j] + delayedInput;
             this.lpState[j] = val * (1 - lpCoef) + this.lpState[j] * lpCoef;
             this.delayBuffers[j][this.delayPointers[j]] = this.lpState[j];
             this.delayPointers[j] = (this.delayPointers[j] + 1) % this.delayTimes[j];
           }
+
           outputL[i] = (nodeSignals[0] + nodeSignals[2]) * 0.5;
           outputR[i] = (nodeSignals[1] + nodeSignals[3]) * 0.5;
         }
@@ -89,14 +106,15 @@ export class AudioEngine {
 
     try {
       await this.close();
-      const workletUrl = await this.getWorkletUrl();
+      this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
       
-      this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (outputDeviceId && (this.ctx as any).setSinkId) {
+      if (outputDeviceId && outputDeviceId !== 'default' && (this.ctx as any).setSinkId) {
         await (this.ctx as any).setSinkId(outputDeviceId);
       }
 
+      const workletUrl = await this.getWorkletUrl();
       await this.ctx.audioWorklet.addModule(workletUrl);
+      URL.revokeObjectURL(workletUrl);
 
       if (previewFile) {
         const buffer = await previewFile.arrayBuffer();
@@ -118,13 +136,10 @@ export class AudioEngine {
         this.source = this.ctx.createMediaStreamSource(this.stream);
       }
 
-      // Routing
       this.analyserInput = this.ctx.createAnalyser();
       this.analyserOutput = this.ctx.createAnalyser();
       this.analyserInput.fftSize = 2048;
       this.analyserOutput.fftSize = 2048;
-
-      this.source.connect(this.analyserInput);
 
       this.lowCutFilter = this.ctx.createBiquadFilter();
       this.lowCutFilter.type = 'highpass';
@@ -135,25 +150,22 @@ export class AudioEngine {
       this.wetGainNode = this.ctx.createGain();
       this.wetPathDryGainNode = this.ctx.createGain();
       this.bypassGainNode = this.ctx.createGain();
+      this.masterGainNode = this.ctx.createGain();
 
-      // Path A: Effect
+      this.source.connect(this.analyserInput);
+
       this.source.connect(this.lowCutFilter);
       this.lowCutFilter.connect(this.highCutFilter);
       this.highCutFilter.connect(this.reverbNode);
       this.reverbNode.connect(this.wetGainNode);
-      
-      // Path B: Dry in Wet Path
       this.source.connect(this.wetPathDryGainNode);
-
-      // Path C: Absolute Bypass
       this.source.connect(this.bypassGainNode);
 
-      const masterMix = this.ctx.createGain();
-      this.wetGainNode.connect(masterMix);
-      this.wetPathDryGainNode.connect(masterMix);
-      this.bypassGainNode.connect(masterMix);
+      this.wetGainNode.connect(this.masterGainNode);
+      this.wetPathDryGainNode.connect(this.masterGainNode);
+      this.bypassGainNode.connect(this.masterGainNode);
 
-      masterMix.connect(this.analyserOutput);
+      this.masterGainNode.connect(this.analyserOutput);
       this.analyserOutput.connect(this.ctx.destination);
 
       if (this.ctx.state === 'suspended') {
@@ -164,12 +176,41 @@ export class AudioEngine {
         this.source.start(0);
       }
 
+      // 安全装置のレベル監視を開始
+      this.startSafetyMonitoring();
+
     } catch (e) {
       console.error("AudioEngine init failed", e);
       throw e;
     } finally {
       this.isInitializing = false;
     }
+  }
+
+  private startSafetyMonitoring() {
+    if (!this.analyserOutput) return;
+    const dataArray = new Float32Array(this.analyserOutput.fftSize);
+    
+    const checkLevel = () => {
+      if (!this.analyserOutput || !this.masterGainNode) return;
+      this.analyserOutput.getFloatTimeDomainData(dataArray);
+      
+      let max = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const abs = Math.abs(dataArray[i]);
+        if (abs > max) max = abs;
+      }
+
+      // 1.5倍(約3.5dB)を超えるピークをフィードバックとみなす
+      if (max > 1.5) {
+        this.masterGainNode.gain.value = 0;
+        if (this.onAutoMuteTriggered) this.onAutoMuteTriggered();
+        console.warn("CRITICAL: Feedback detected. Auto-mute triggered.");
+        return;
+      }
+      this.safetyTimer = requestAnimationFrame(checkLevel);
+    };
+    this.safetyTimer = requestAnimationFrame(checkLevel);
   }
 
   updateSettings(settings: AudioSettings) {
@@ -189,10 +230,14 @@ export class AudioEngine {
       if (preDelay) preDelay.setTargetAtTime(settings.reverbPreDelay, now, ramp);
     }
 
+    if (this.masterGainNode) {
+      this.masterGainNode.gain.setTargetAtTime(settings.masterGain, now, ramp);
+    }
+
     if (settings.bypassEffects) {
       if (this.wetGainNode) this.wetGainNode.gain.setTargetAtTime(0, now, ramp);
       if (this.wetPathDryGainNode) this.wetPathDryGainNode.gain.setTargetAtTime(0, now, ramp);
-      if (this.bypassGainNode) this.bypassGainNode.gain.setTargetAtTime(settings.bypassGain, now, ramp);
+      if (this.bypassGainNode) this.bypassGainNode.gain.setTargetAtTime(1.0, now, ramp);
     } else {
       if (this.wetGainNode) this.wetGainNode.gain.setTargetAtTime(settings.wetGain, now, ramp);
       if (this.wetPathDryGainNode) this.wetPathDryGainNode.gain.setTargetAtTime(settings.wetPathDryGain, now, ramp);
@@ -201,13 +246,12 @@ export class AudioEngine {
   }
 
   async close() {
+    if (this.safetyTimer) cancelAnimationFrame(this.safetyTimer);
+    if (this.source instanceof AudioBufferSourceNode) {
+      try { this.source.stop(); } catch(e) {}
+    }
     if (this.ctx) { 
-      try { 
-        if (this.source instanceof AudioBufferSourceNode) {
-          this.source.stop();
-        }
-        await this.ctx.close(); 
-      } catch(e) {} 
+      try { await this.ctx.close(); } catch(e) {} 
       this.ctx = null; 
     }
     if (this.stream) { 
@@ -216,18 +260,19 @@ export class AudioEngine {
     }
     this.source = null;
     this.reverbNode = null;
+    this.masterGainNode = null;
     this.analyserInput = null;
     this.analyserOutput = null;
   }
 
   async renderOffline(file: File, settings: AudioSettings): Promise<Blob> {
     const arrayBuffer = await file.arrayBuffer();
-    const tempCtx = new AudioContext();
+    const tempCtx = new AudioContext({ sampleRate: 48000 });
     const sourceBuffer = await tempCtx.decodeAudioData(arrayBuffer);
     await tempCtx.close();
 
     const renderDuration = sourceBuffer.duration + settings.reverbDuration + 0.5;
-    const offlineCtx = new OfflineAudioContext(2, Math.ceil(renderDuration * sourceBuffer.sampleRate), sourceBuffer.sampleRate);
+    const offlineCtx = new OfflineAudioContext(2, Math.ceil(renderDuration * 48000), 48000);
     
     const workletUrl = await this.getWorkletUrl();
     await offlineCtx.audioWorklet.addModule(workletUrl);
@@ -235,40 +280,44 @@ export class AudioEngine {
     const source = offlineCtx.createBufferSource();
     source.buffer = sourceBuffer;
 
-    const lowCut = offlineCtx.createBiquadFilter();
-    lowCut.type = 'highpass';
-    lowCut.frequency.value = settings.lowCut;
-
-    const highCut = offlineCtx.createBiquadFilter();
-    highCut.type = 'lowpass';
-    highCut.frequency.value = settings.highCut;
-
-    const reverb = new AudioWorkletNode(offlineCtx, 'reverb-processor', {
-      parameterData: {
-        rt60: settings.reverbDuration,
-        damping: settings.reverbDecay,
-        preDelay: settings.reverbPreDelay
-      }
-    });
-
-    const wetGain = offlineCtx.createGain();
-    const dryPathGain = offlineCtx.createGain();
+    const master = offlineCtx.createGain();
+    master.gain.value = settings.masterGain;
 
     if (settings.bypassEffects) {
-      const bypass = offlineCtx.createGain();
-      bypass.gain.value = settings.bypassGain;
-      source.connect(bypass);
-      bypass.connect(offlineCtx.destination);
+      source.connect(master);
+      master.connect(offlineCtx.destination);
     } else {
+      const lowCut = offlineCtx.createBiquadFilter();
+      lowCut.type = 'highpass';
+      lowCut.frequency.value = settings.lowCut;
+
+      const highCut = offlineCtx.createBiquadFilter();
+      highCut.type = 'lowpass';
+      highCut.frequency.value = settings.highCut;
+
+      const reverb = new AudioWorkletNode(offlineCtx, 'reverb-processor', {
+        parameterData: {
+          rt60: settings.reverbDuration,
+          damping: settings.reverbDecay,
+          preDelay: settings.reverbPreDelay
+        }
+      });
+
+      const wetGain = offlineCtx.createGain();
       wetGain.gain.value = settings.wetGain;
+      const dryPathGain = offlineCtx.createGain();
       dryPathGain.gain.value = settings.wetPathDryGain;
+
       source.connect(lowCut);
       lowCut.connect(highCut);
       highCut.connect(reverb);
       reverb.connect(wetGain);
-      wetGain.connect(offlineCtx.destination);
+      wetGain.connect(master);
+
       source.connect(dryPathGain);
-      dryPathGain.connect(offlineCtx.destination);
+      dryPathGain.connect(master);
+
+      master.connect(offlineCtx.destination);
     }
 
     source.start(0);

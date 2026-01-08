@@ -10,15 +10,39 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .slider-thumb::-webkit-slider-thumb {
+        
+        /* Range Slider Styling */
+        input[type=range].slider-input {
             -webkit-appearance: none;
-            appearance: none;
-            width: 18px;
-            height: 18px;
-            background: #3b82f6;
-            cursor: pointer;
-            border-radius: 50%;
+            background: transparent;
         }
+        
+        /* Track */
+        input[type=range].slider-input::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+        }
+
+        /* Thumb - CSS変数 --thumb-color を使って動的に色を変える */
+        input[type=range].slider-input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: var(--thumb-color, #3b82f6);
+            cursor: pointer;
+            margin-top: -5px; /* (track height / 2) - (thumb height / 2) */
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            transition: transform 0.1s ease;
+        }
+        
+        input[type=range].slider-input:active::-webkit-slider-thumb {
+            transform: scale(1.3);
+        }
+
         /* Custom Scrollbar Styles */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
