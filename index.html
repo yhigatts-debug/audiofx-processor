@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
         // NetlifyのSnippet Injectionで設定される window.process.env を保護しつつ初期化
+        // このスクリプトは必ずSnippet Injectionより後に実行される必要があります。
         (function() {
             window.process = window.process || {};
             window.process.env = window.process.env || {};
@@ -65,23 +66,21 @@
             background: rgba(255, 255, 255, 0.2);
         }
     </style>
-<script type="importmap">
-{
-  "imports": {
-    "d3": "https://esm.sh/d3@^7.9.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3"
-  }
-}
-</script>
-<link rel="stylesheet" href="/index.css">
+    <script type="importmap">
+    {
+      "imports": {
+        "d3": "https://esm.sh/d3@^7.9.0",
+        "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+        "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+        "react/": "https://esm.sh/react@^19.2.3/",
+        "react": "https://esm.sh/react@^19.2.3"
+      }
+    }
+    </script>
+    <!-- エントリーポイントをhead内でモジュールとして読み込み、Viteによる最適化を促します -->
+    <script src="index.tsx" type="module"></script>
 </head>
 <body class="bg-[#0a0a0c] text-slate-100 overflow-hidden">
     <div id="root"></div>
-    <!-- 以下の行が抜けていたため、プログラムが起動していませんでした -->
-    <script src="index.tsx" type="module"></script>
-<script type="module" src="/index.tsx"></script>
 </body>
 </html>
