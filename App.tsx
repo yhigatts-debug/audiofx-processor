@@ -142,6 +142,15 @@ const App: React.FC = () => {
     }
   };
 
+  const resetFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (settings.isProcessing) {
+      // ファイルを解除した後はマイク入力に切り替えるため一度エンジンを止める
+      toggleProcessing();
+    }
+  };
+
   useEffect(() => {
     if (settings.isProcessing) {
       audioEngine.updateSettings(settings);
@@ -193,27 +202,45 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${selectedFile ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-white/5 border-white/10 text-slate-400'}`}
-            >
-              {selectedFile ? 'FILE SELECTED' : 'CHOOSE FILE'}
-            </button>
-            <button 
-              onClick={() => setSettings(s => ({...s, bypassEffects: !s.bypassEffects}))} 
-              disabled={!settings.isProcessing}
-              className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${settings.bypassEffects ? 'bg-amber-500 text-white border-amber-400' : 'bg-white/5 border-white/10 text-slate-400'}`}
-            >
-              BYPASS FX
-            </button>
+          <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="relative group col-span-1">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`w-full py-2 rounded-lg text-[9px] font-bold border transition-all ${selectedFile ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-white/5 border-white/10 text-slate-400'}`}
+                >
+                  {selectedFile ? 'CHANGE FILE' : 'CHOOSE FILE'}
+                </button>
+                {selectedFile && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); resetFile(); }}
+                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[8px] hover:bg-red-600 shadow-md z-30"
+                    title="ファイルを解除してマイクに戻す"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <button 
+                onClick={() => setSettings(s => ({...s, bypassEffects: !s.bypassEffects}))} 
+                disabled={!settings.isProcessing}
+                className={`py-2 rounded-lg text-[9px] font-bold border transition-all ${settings.bypassEffects ? 'bg-amber-500 text-white border-amber-400' : 'bg-white/5 border-white/10 text-slate-400'}`}
+              >
+                BYPASS FX
+              </button>
+            </div>
+            {selectedFile && (
+              <div className="text-[8px] text-indigo-300 truncate mt-1 px-1 bg-indigo-500/10 py-1 rounded">
+                📄 {selectedFile.name}
+              </div>
+            )}
           </div>
           <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="audio/*" className="hidden" />
 
           <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-3">
             <h3 className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Routing</h3>
             <select value={inputDeviceId} onChange={e => setInputDeviceId(e.target.value)} className="w-full bg-black border border-white/10 rounded-lg p-1.5 text-[10px] text-slate-200 outline-none">
-              <option value="default">Default Input</option>
+              <option value="default">Default Input (Mic)</option>
               {inputDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
             </select>
             <select value={outputDeviceId} onChange={e => setOutputDeviceId(e.target.value)} className="w-full bg-black border border-white/10 rounded-lg p-1.5 text-[10px] text-slate-200 outline-none">
