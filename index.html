@@ -7,6 +7,13 @@
     <title>AudioFX Processor</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // NetlifyのSnippet Injectionで設定される window.process.env を保護しつつ初期化
+        (function() {
+            window.process = window.process || {};
+            window.process.env = window.process.env || {};
+        })();
+    </script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
@@ -26,7 +33,7 @@
             border-radius: 10px;
         }
 
-        /* Thumb - CSS変数 --thumb-color を使って動的に色を変える */
+        /* Thumb */
         input[type=range].slider-input::-webkit-slider-thumb {
             -webkit-appearance: none;
             height: 14px;
@@ -34,7 +41,7 @@
             border-radius: 50%;
             background: var(--thumb-color, #3b82f6);
             cursor: pointer;
-            margin-top: -5px; /* (track height / 2) - (thumb height / 2) */
+            margin-top: -5px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
             transition: transform 0.1s ease;
         }
@@ -43,7 +50,6 @@
             transform: scale(1.3);
         }
 
-        /* Custom Scrollbar Styles */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
         }
@@ -74,6 +80,8 @@
 </head>
 <body class="bg-[#0a0a0c] text-slate-100 overflow-hidden">
     <div id="root"></div>
+    <!-- 以下の行が抜けていたため、プログラムが起動していませんでした -->
+    <script src="index.tsx" type="module"></script>
 <script type="module" src="/index.tsx"></script>
 </body>
 </html>

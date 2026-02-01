@@ -2,13 +2,23 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 export const getGeminiPresets = async (description: string) => {
-  // Always use a new instance to ensure it uses the latest API key from process.env.API_KEY
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // ブラウザ環境において、複数の方法でAPIキーの取得を試みます
+  const apiKey = (window as any).process?.env?.API_KEY || 
+                 (typeof process !== 'undefined' ? process.env?.API_KEY : undefined);
+
+  if (!apiKey || apiKey === "undefined" || apiKey === "null" || apiKey.length < 10) {
+    // Netlifyの「Environment variables」はビルド用であり、ブラウザからは直接見えません。
+    // 「Snippet injection」機能を使用して、以下を注入する必要があります：
+    // <script>window.process = { env: { API_KEY: "あなたのキー" } };</script>
+    throw new Error("APIキーが正しく認識されていません。NetlifyのSnippet設定で window.process.env.API_KEY が正しく定義されているか確認してください。");
+  }
+
+  // APIを呼び出す直前にインスタンス化し、常に最新のキーを使用するようにします
+  const ai = new GoogleGenAI({ apiKey });
 
   try {
     const response = await ai.models.generateContent({
-      // Use gemini-3-pro-preview for complex reasoning tasks like acoustic engineering
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: `
         [Role] Professional Acoustic Engineer
         [Task] Create 3 reverb presets for the following environment:
@@ -25,7 +35,6 @@ export const getGeminiPresets = async (description: string) => {
         - wetGain: 0.0 to 1.0
       `,
       config: {
-        // By default, the model decides how much to think, but for complex tasks, pro models benefit from reasoning.
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -68,8 +77,12 @@ export const getGeminiPresets = async (description: string) => {
         wetPathDryGain: 1.0
       }
     }));
-  } catch (e) {
-    console.error("Gemini API Error:", e);
-    return [];
+  } catch (e: any) {
+    console.error("Gemini API Error details:", e);
+    // SDK内部のエラーメッセージをより分かりやすいものに変換
+    if (e.message?.includes("API Key")) {
+      throw new Error("APIキーがSDKに正しく渡されていません。Snippetの記述（window.process.env.API_KEY = \"...\"）を確認してください。");
+    }
+    throw new Error(e.message || "Gemini APIへの接続中にエラーが発生しました。");
   }
 };
