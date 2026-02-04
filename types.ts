@@ -1,44 +1,33 @@
 
 export interface AudioSettings {
-  dryGain: number;
   wetGain: number;
   wetPathDryGain: number;
-  reverbDecay: number;
+  
+  // 共通パラメータ
+  reverbDuration: number; // RT60
   reverbPreDelay: number;
-  reverbDuration: number;
   lowCut: number;
   highCut: number;
+  masterGain: number;
+  
+  // Lexicon系
+  lexSpin: number;
+  lexWander: number;
+  lexBassMult: number;
+  
+  // Bricasti系
+  briDensity: number;
+  briSize: number;
+  briVRoll: number;
+  
+  // TC系
+  tcAir: number;
+  tcEarlyLate: number;
+  tcHiDamp: number;
+
   isProcessing: boolean;
   bypassEffects: boolean;
-  bypassGain: number; 
-  masterGain: number; // 全体の出力音量
-}
-
-export interface AudioEnvironmentProfile {
-  version: string;
-  "@context": {
-    rt60: "Reverb duration in seconds (Time to decay by 60dB)";
-    damping: "High-frequency absorption factor (1.0 = linear, 10.0 = heavy damping)";
-    preDelay: "Initial delay before reverb starts in seconds";
-    highPassHz: "Low-cut filter frequency in Hertz";
-    lowPassHz: "High-cut filter frequency in Hertz";
-    mixRatio: "Dry/Wet balance (0.0 = Dry, 1.0 = Wet)";
-    masterVol: "Overall output level";
-  };
-  metadata: {
-    name: string;
-    targetEnvironment: string;
-    engineerNotes: string;
-  };
-  parameters: {
-    rt60: number;
-    damping: number;
-    preDelay: number;
-    highPassHz: number;
-    lowPassHz: number;
-    mixRatio: number;
-    masterVol: number;
-  };
+  algoMode: 'lexicon' | 'bricasti' | 'tcelectronic';
 }
 
 export interface PresetSuggestion {

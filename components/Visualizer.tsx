@@ -12,151 +12,112 @@ interface VisualizerProps {
 
 const Visualizer: React.FC<VisualizerProps> = React.memo(({ analyserA, analyserB, colorA, colorB, labelA, labelB }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const smoothedDataA = useRef<Float32Array | null>(null);
-  const smoothedDataB = useRef<Float32Array | null>(null);
+  
+  // PropsをRefに同期（再レンダリングを介さずに描画ループへ供給）
+  const refs = useRef({ analyserA, analyserB, colorA, colorB, labelA, labelB });
+  const data = useRef({
+    smoothedA: new Float32Array(1024),
+    smoothedB: new Float32Array(1024),
+    freqData: new Uint8Array(1024)
+  });
+
+  useEffect(() => {
+    refs.current = { analyserA, analyserB, colorA, colorB, labelA, labelB };
+  }, [analyserA, analyserB, colorA, colorB, labelA, labelB]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    let animationId: number;
-    const fftSize = analyserA?.fftSize || 2048;
-    const bufferLength = fftSize / 2;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    if (!smoothedDataA.current || smoothedDataA.current.length !== bufferLength) {
-      smoothedDataA.current = new Float32Array(bufferLength);
-      smoothedDataB.current = new Float32Array(bufferLength);
-    }
-
-    const minFreq = 20;
-    const maxFreq = 20000;
-    const logMin = Math.log10(minFreq);
-    const logMax = Math.log10(maxFreq);
-
-    const getX = (freq: number, w: number) => {
-      const logFreq = Math.log10(Math.max(minFreq, freq));
-      return ((logFreq - logMin) / (logMax - logMin)) * w;
-    };
-
-    // ポイントを計算する関数
-    const getPoints = (analyser: AnalyserNode | null, smoothedArray: Float32Array, width: number, graphHeight: number) => {
-      if (!analyser || !analyser.context) return null;
-      try {
-        analyser.getByteFrequencyData(dataArray);
-      } catch (e) { return null; }
-
-      const sf = 0.82; 
-      for (let i = 0; i < bufferLength; i++) {
-        smoothedArray[i] = smoothedArray[i] * sf + dataArray[i] * (1 - sf);
-      }
-
-      const points: {x: number, y: number}[] = [];
-      const step = 4;
-      const sampleRate = analyser.context.sampleRate;
-      const binToFreq = sampleRate / fftSize;
-
-      for (let x = 0; x <= width; x += step) {
-        const freq = Math.pow(10, logMin + (x / width) * (logMax - logMin));
-        const bin = Math.round(freq / binToFreq);
-        if (bin >= bufferLength) break;
-
-        const val = smoothedArray[bin] / 255;
-        const mag = Math.pow(val, 0.5) * 1.1; 
-        const y = graphHeight - Math.min(1, mag) * graphHeight;
-        points.push({x, y});
-      }
-      return points;
-    };
+    let animId: number;
 
     const render = () => {
+      animId = requestAnimationFrame(render);
+
+      const { analyserA, analyserB, colorA, colorB, labelA, labelB } = refs.current;
+      const { smoothedA, smoothedB, freqData } = data.current;
       const w = canvas.width;
       const h = canvas.height;
-      const lh = 30;
-      const gh = h - lh;
+      const gh = h - 30;
 
-      ctx.fillStyle = '#0a0a0c';
-      ctx.fillRect(0, 0, w, h);
+      try {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#0a0a0c';
+        ctx.fillRect(0, 0, w, h);
 
-      // グリッド
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      [20, 100, 1000, 10000, 20000].forEach(f => {
-        const x = getX(f, w);
-        ctx.moveTo(x, 0); ctx.lineTo(x, gh);
-      });
-      ctx.stroke();
+        const minLog = Math.log10(20);
+        const maxLog = Math.log10(20000);
 
-      // 周波数ラベル
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      [100, 1000, 10000].forEach(f => {
-        const x = getX(f, w);
-        ctx.fillText(f >= 1000 ? `${f/1000}kHz` : `${f}Hz`, x, h - 10);
-      });
+        const drawSignal = (analyser: AnalyserNode | null, smoothed: Float32Array, color: string, isOutput: boolean) => {
+          if (!analyser || analyser.context.state !== 'running') return;
+          
+          try {
+            analyser.getByteFrequencyData(freqData);
+          } catch (e) { return; }
 
-      const pointsA = getPoints(analyserA, smoothedDataA.current!, w, gh);
-      const pointsB = getPoints(analyserB, smoothedDataB.current!, w, gh);
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          // 出力は鮮やかに、入力は太く明るくして視認性を確保
+          ctx.lineWidth = isOutput ? 2.5 : 2.0; 
+          // 入力(Source)の不透明度を0.6から0.85に上げて明るく表示
+          ctx.globalAlpha = isOutput ? 1.0 : 0.85; 
 
-      // --- 1. まず塗りつぶしだけを先に描く (重なりを許容) ---
-      [ {p: pointsA, c: colorA}, {p: pointsB, c: colorB} ].forEach(obj => {
-        if (!obj.p || obj.p.length === 0) return;
-        ctx.beginPath();
-        ctx.moveTo(obj.p[0].x, obj.p[0].y);
-        obj.p.forEach(pt => ctx.lineTo(pt.x, pt.y));
-        ctx.lineTo(w, gh);
-        ctx.lineTo(0, gh);
-        ctx.closePath();
-        ctx.fillStyle = obj.c + '12'; // 透明度をさらに下げて比較しやすく(約7%)
-        ctx.fill();
-      });
+          const sf = 0.88;
+          for (let i = 0; i < w; i += 4) {
+            const freq = Math.pow(10, minLog + (i / w) * (maxLog - minLog));
+            const bin = Math.round(freq * analyser.fftSize / analyser.context.sampleRate);
+            const val = freqData[bin] || 0;
+            
+            smoothed[bin] = smoothed[bin] * sf + val * (1 - sf);
+            const y = gh - (Math.pow(smoothed[bin] / 255, 0.5) * gh);
 
-      // --- 2. 次に線を上に描く (Out Bを強調) ---
-      if (pointsA && pointsA.length > 0) {
-        ctx.beginPath();
-        ctx.strokeStyle = colorA;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([]);
-        ctx.moveTo(pointsA[0].x, pointsA[0].y);
-        pointsA.forEach(pt => ctx.lineTo(pt.x, pt.y));
-        ctx.stroke();
-      }
+            if (Number.isFinite(y)) {
+              if (i === 0) ctx.moveTo(i, y);
+              else ctx.lineTo(i, y);
+            }
+          }
+          ctx.stroke();
 
-      if (pointsB && pointsB.length > 0) {
-        // Out Bにグロー効果を加える
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = colorB;
-        ctx.beginPath();
-        ctx.strokeStyle = colorB;
-        ctx.lineWidth = 2.5; // Out Bの線を太く
-        ctx.moveTo(pointsB[0].x, pointsB[0].y);
-        pointsB.forEach(pt => ctx.lineTo(pt.x, pt.y));
-        ctx.stroke();
-        ctx.shadowBlur = 0; // 他の描画に影響しないよう戻す
-      }
+          if (isOutput) {
+            ctx.globalAlpha = 0.2;
+            ctx.lineWidth = 6;
+            ctx.stroke(); 
+          }
+          ctx.globalAlpha = 1.0;
+        };
 
-      // 凡例
-      ctx.textAlign = 'left';
-      ctx.font = 'bold 11px Inter';
-      ctx.fillStyle = colorA; ctx.fillRect(20, 20, 8, 8);
-      ctx.fillStyle = '#fff'; ctx.fillText(labelA, 35, 28);
-      ctx.fillStyle = colorB; ctx.fillRect(20, 40, 8, 8);
-      ctx.fillStyle = '#fff'; ctx.fillText(labelB, 35, 48);
+        // 周波数グリッド
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        [100, 1000, 10000].forEach(f => {
+          const x = ((Math.log10(f) - minLog) / (maxLog - minLog)) * w;
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
+        });
 
-      animationId = requestAnimationFrame(render);
+        // 背景に近い色から先に描画
+        // 1. Source (明るいグレー) 2. Processed (カラー)
+        drawSignal(analyserA, smoothedA, colorA, false);
+        drawSignal(analyserB, smoothedB, colorB, true);
+
+        // 凡例
+        ctx.textAlign = 'left';
+        ctx.font = 'bold 11px Inter';
+        ctx.fillStyle = colorA; ctx.fillRect(20, 20, 8, 8);
+        ctx.fillStyle = '#94a3b8'; ctx.fillText(labelA, 35, 28);
+        ctx.fillStyle = colorB; ctx.fillRect(20, 40, 8, 8);
+        ctx.fillStyle = '#fff'; ctx.fillText(labelB, 35, 48);
+
+      } catch (err) {}
     };
 
-    animationId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animationId);
-  }, [analyserA, analyserB, colorA, colorB, labelA, labelB]);
+    animId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animId);
+  }, []);
 
   return (
-    <div className="relative w-full h-full bg-[#0a0a0c] rounded-3xl overflow-hidden border border-white/10 shadow-inner">
+    <div className="relative w-full h-full bg-[#0a0a0c] rounded-3xl overflow-hidden border border-white/10 shadow-2xl">
       <canvas ref={canvasRef} width={800} height={400} className="w-full h-full block" />
     </div>
   );
